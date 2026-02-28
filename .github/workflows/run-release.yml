@@ -1,0 +1,85 @@
+name: Build and Release Routing Rules
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build geosite.dat
+        run: |
+          git clone https://github.com/v2fly/domain-list-community.git
+          cd domain-list-community
+          
+          cp ../domain/* ./data/
+          go run main.go
+          
+          mv dlc.dat ../geosite.dat
+          cd ..
+
+      - name: Build geoip.dat
+        run: |
+          git clone https://github.com/v2fly/geoip.git
+          cd geoip
+          
+          echo '{"input": [], "output": [{"type": "v2rayGeoIPDat", "action": "output", "args": {"outputName": "geoip.dat"}}]}' > config.json
+          
+          for file in ../ip/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              
+              jq --arg name "$filename" --arg uri "$file" \
+                 '.input += [{"type": "text", "action": "add", "args": {"name": $name, "uri": $uri}}]' \
+                 config.json > tmp.json && mv tmp.json config.json
+            fi
+          done
+          
+          echo "Generated config.json:"
+          cat config.json
+          
+          go run . -c config.json
+          
+          mv geoip.dat ../geoip.dat
+          cd ..
+
+      - name: Release to latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git tag -f latest
+          git push -f origin latest
+          
+          gh release delete latest -y || true
+          
+          FORMATTED_TIME=$(TZ='Europe/Moscow' date -d "$COMMIT_TIMESTAMP" '+%d.%m.%Y в %H:%M')
+          FORMATTED_DATE=$(TZ='Europe/Moscow' date -d "$COMMIT_TIMESTAMP" '+%d.%m.%Y')
+          
+          echo "🕒 **Собрано:** $FORMATTED_TIME" > release_notes.txt
+          echo "📝 **Изменения (PR/Commit):**" >> release_notes.txt
+          echo '```text' >> release_notes.txt
+          echo "$COMMIT_MSG" >> release_notes.txt
+          echo '```' >> release_notes.txt
+          
+          gh release create latest \
+            --title "Latest V2Ray Rules $FORMATTED_DATE" \
+            --notes-file release_notes.txt \
+            geosite.dat geoip.dat
