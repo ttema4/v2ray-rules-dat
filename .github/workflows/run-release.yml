@@ -22,27 +22,32 @@ jobs:
 
       - name: Build geosite.dat
         run: |
+          set -e
           git clone https://github.com/v2fly/domain-list-community.git
-          cd domain-list-community
+          pushd domain-list-community
           
           cp ../domain/* ./data/
           go run main.go
           
           mv dlc.dat ../geosite.dat
-          cd ..
+          popd
+
+          echo "✅ geosite.dat successfully built!"
 
       - name: Build geoip.dat
         run: |
+          set -e
           git clone https://github.com/v2fly/geoip.git
-          cd geoip
+          pushd geoip
           
           echo '{"input": [], "output": [{"type": "v2rayGeoIPDat", "action": "output", "args": {"outputName": "geoip.dat"}}]}' > config.json
           
           for file in ../ip/*; do
             if [ -f "$file" ]; then
               filename=$(basename "$file")
+              abs_uri=$(realpath "$file")
               
-              jq --arg name "$filename" --arg uri "$file" \
+              jq --arg name "$filename" --arg uri "$abs_uri" \
                  '.input += [{"type": "text", "action": "add", "args": {"name": $name, "uri": $uri}}]' \
                  config.json > tmp.json && mv tmp.json config.json
             fi
@@ -53,8 +58,10 @@ jobs:
           
           go run . -c config.json
           
-          mv geoip.dat ../geoip.dat
-          cd ..
+          mv output/dat/geoip.dat ../geoip.dat
+          popd
+
+          echo "✅ geoip.dat successfully built!"
 
       - name: Release to latest
         env:
@@ -68,9 +75,9 @@ jobs:
           git tag -f latest
           git push -f origin latest
           
-          gh release delete latest -y || true
+          gh release delete latest -y 2>/dev/null; true
           
-          FORMATTED_TIME=$(TZ='Europe/Moscow' date -d "$COMMIT_TIMESTAMP" '+%d.%m.%Y в %H:%M')
+          FORMATTED_TIME=$(TZ='Europe/Moscow' date -d "$COMMIT_TIMESTAMP" '+%d.%m.%Y at %H:%M')
           FORMATTED_DATE=$(TZ='Europe/Moscow' date -d "$COMMIT_TIMESTAMP" '+%d.%m.%Y')
           
           echo "🕒 **Built:** $FORMATTED_TIME" > release_notes.txt
@@ -83,3 +90,5 @@ jobs:
             --title "V2Ray Rules $FORMATTED_DATE" \
             --notes-file release_notes.txt \
             geosite.dat geoip.dat
+        
+          echo "🚀 Release 'Latest V2Ray Rules $FORMATTED_DATE' successfully built and published!"
