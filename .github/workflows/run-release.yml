@@ -25,6 +25,8 @@ jobs:
           set -e
           git clone https://github.com/v2fly/domain-list-community.git
           pushd domain-list-community
+
+          rm -rf ./data/*
           
           cp ../domain/* ./data/
           go run main.go
